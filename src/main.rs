@@ -10,6 +10,7 @@ use ratatui::{
 };
 use tui::Tui;
 
+mod gemini;
 mod tui;
 
 struct App {

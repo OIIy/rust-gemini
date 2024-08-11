@@ -66,7 +66,7 @@ pub enum GeminiError {
     Serialization(#[from] serde_json::Error),
 }
 
-struct Gemini {
+pub struct Gemini {
     client: Arc<Client>,
     api_key: String,
     model: String,

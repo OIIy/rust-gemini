@@ -2,9 +2,13 @@ use std::io::Result;
 use std::time::Duration;
 use std::time::Instant;
 
+use gemini::Gemini;
+use gemini::GeminiError;
 use ratatui::crossterm::event;
 use ratatui::crossterm::event::Event;
 use ratatui::crossterm::event::KeyCode;
+use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::KeyModifiers;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
@@ -15,6 +19,8 @@ use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::Frame;
+use tokio::runtime::Runtime;
+use tokio::task;
 use tui::Tui;
 
 mod gemini;
@@ -25,6 +31,7 @@ struct App {
     show_input: bool,
     input_field: InputField,
     response_window: ResponseWindow,
+    gemini_client: Gemini,
 }
 
 struct ResponseWindow {
@@ -41,7 +48,15 @@ impl Widget for &ResponseWindow {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
         let window = Block::new().title("Gemini").borders(Borders::ALL);
 
-        window.render(area, buf);
+        let mut response = String::from("Nothing yet.");
+
+        if !self.response.is_empty() {
+            response = self.response[0].clone();
+        }
+
+        let response_text = Paragraph::new(response).block(window);
+
+        response_text.render(area, buf);
     }
 }
 
@@ -55,6 +70,10 @@ impl InputField {
             input: String::from(""),
         }
     }
+
+    fn clear(&mut self) {
+        self.input = String::from("");
+    }
 }
 
 impl Widget for &InputField {
@@ -64,12 +83,14 @@ impl Widget for &InputField {
             .borders(Borders::ALL)
             .border_style(Style::new().bold());
 
-        input_field.render(area, buf);
+        let input_text = Paragraph::new(self.input.clone()).block(input_field);
+
+        input_text.render(area, buf);
     }
 }
 
 impl App {
-    fn run(&mut self, terminal: &mut Tui) -> Result<()> {
+    async fn run(&mut self, terminal: &mut Tui) -> Result<()> {
         let last_tick = Instant::now();
 
         loop {
@@ -79,35 +100,45 @@ impl App {
 
             terminal.draw(|f| self.render_ui(f))?;
 
-            self.handle_events(last_tick)?;
+            self.handle_events(last_tick).await;
         }
     }
 
     fn render_ui(&mut self, frame: &mut Frame) {
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Max(8)])
+            .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
             .split(frame.area());
 
         self.response_window.render(layout[0], frame.buffer_mut());
         self.input_field.render(layout[1], frame.buffer_mut());
     }
 
-    fn handle_events(&mut self, last_tick: Instant) -> Result<()> {
+    // TODO: Refactor using non-blocking event reads and an event stream
+    async fn handle_events(&mut self, last_tick: Instant) -> Result<()> {
         let timeout = Duration::from_millis(50)
             .checked_sub(last_tick.elapsed())
             .unwrap_or(Duration::ZERO);
 
         if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => {
+            if let Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) = event::read()?
+            {
+                if modifiers == KeyModifiers::CONTROL {
+                    if let KeyCode::Char('q') = code {
                         self.exit();
                     }
-                    KeyCode::Enter => {
-                        self.submit_input(&self.input_field.input);
+                } else {
+                    match code {
+                        KeyCode::Enter => {
+                            self.submit_input().await;
+                        }
+                        KeyCode::Backspace => {
+                            self.input_field.input.pop();
+                        }
+                        _ => self.input_field.input += &code.to_string(),
                     }
-                    _ => {}
                 }
             }
         }
@@ -115,7 +146,18 @@ impl App {
         Ok(())
     }
 
-    fn submit_input(&self, input: &str) -> Result<()> {
+    async fn submit_input(&mut self) -> Result<()> {
+        let response = self
+            .gemini_client
+            .ask(self.input_field.input.as_ref())
+            .await;
+
+        if response.is_ok() {
+            self.response_window.response = response.unwrap();
+        }
+
+        self.input_field.clear();
+
         Ok(())
     }
 
@@ -125,21 +167,26 @@ impl App {
 }
 
 fn main() -> Result<()> {
-    println!("Hello, world!");
+    let api_key = "AIzaSyC0oK8pgMdT1zM0VouuWxlinJJs_brulkM";
+    let gemini_model = "gemini-1.5-flash";
+    let mut gemini = gemini::Gemini::new(Some(api_key), Some(gemini_model));
 
     let mut app = App {
         should_exit: false,
         show_input: true,
         input_field: InputField::default(),
         response_window: ResponseWindow::default(),
+        gemini_client: gemini,
     };
 
     // Create backend
     let mut tui = tui::init()?;
 
-    let app_result = app.run(&mut tui);
+    task::spawn_blocking(move || {
+        app.run(&mut tui);
+    });
 
     tui::restore()?;
 
-    app_result
+    Ok(())
 }

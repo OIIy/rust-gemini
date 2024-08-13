@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::io::Result;
 use std::time::Duration;
 use std::time::Instant;
@@ -166,10 +167,19 @@ impl App {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> std::result::Result<(), Box<dyn Error>> {
+    // Here's what we have to do:
+    // 1. Get a response from Gemini to display.
+    // 2. Use background tasks to handle events/async actions
+    // 3. Proper Error Handling
+    // 4. Tests
+    // 5. Health checks
+    // 6. Prettify & Refactor
+
     let api_key = "AIzaSyC0oK8pgMdT1zM0VouuWxlinJJs_brulkM";
     let gemini_model = "gemini-1.5-flash";
-    let mut gemini = gemini::Gemini::new(Some(api_key), Some(gemini_model));
+    let gemini = gemini::Gemini::new(Some(api_key), Some(gemini_model));
 
     let mut app = App {
         should_exit: false,
@@ -182,9 +192,7 @@ fn main() -> Result<()> {
     // Create backend
     let mut tui = tui::init()?;
 
-    task::spawn_blocking(move || {
-        app.run(&mut tui);
-    });
+    app.run(&mut tui).await?;
 
     tui::restore()?;
 

@@ -1,5 +1,3 @@
-use std::error::Error;
-use std::io::Result;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -24,8 +22,12 @@ use tokio::runtime::Runtime;
 use tokio::task;
 use tui::Tui;
 
+mod error;
 mod gemini;
 mod tui;
+
+pub use self::error::Error;
+pub use self::error::Result;
 
 struct App {
     should_exit: bool,
@@ -168,7 +170,7 @@ impl App {
 }
 
 #[tokio::main]
-async fn main() -> std::result::Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     // Here's what we have to do:
     // 1. Get a response from Gemini to display.
     // 2. Use background tasks to handle events/async actions
@@ -192,7 +194,10 @@ async fn main() -> std::result::Result<(), Box<dyn Error>> {
     // Create backend
     let mut tui = tui::init()?;
 
-    app.run(&mut tui).await?;
+    match app.run(&mut tui).await {
+        Ok(_) => println!("Exit code 0"),
+        Err(e) => println!("ERROR: {}", e),
+    }
 
     tui::restore()?;
 
